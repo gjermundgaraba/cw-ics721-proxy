@@ -6,6 +6,7 @@ use cw_ics721_incoming_proxy_derive::{ics721_incoming_proxy_execute, ics721_inco
 pub struct InstantiateMsg {
     pub origin: Option<String>,
     pub channels: Option<Vec<String>>,
+    pub class_ids: Option<Vec<String>>,
 }
 
 #[ics721_incoming_proxy_execute]
@@ -22,5 +23,6 @@ pub enum MigrateMsg {
     WithUpdate {
         origin: Option<String>,
         channels: Option<Vec<String>>,
+        class_ids: Option<Vec<String>>,
     },
 }

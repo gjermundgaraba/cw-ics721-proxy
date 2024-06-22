@@ -29,6 +29,7 @@ pub fn instantiate(
         deps.api,
         msg.origin.clone(),
         msg.channels.clone(),
+        msg.class_ids.clone(),
     )?;
 
     Ok(Response::default()
@@ -46,7 +47,18 @@ pub fn instantiate(
                     sc.join(",")
                 }
             }),
-        ))
+        )
+        .add_attribute(
+            "class_ids",
+            msg.class_ids.map_or("empty".to_string(), |sc| {
+                if sc.is_empty() {
+                    "empty".to_string()
+                } else {
+                    sc.join(",")
+                }
+            }),
+        )
+    )
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -77,8 +89,8 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> StdResult<Response> {
     match msg {
-        MigrateMsg::WithUpdate { origin, channels } => {
-            IncomingProxyContract::default().migrate(deps.storage, deps.api, origin, channels)
+        MigrateMsg::WithUpdate { origin, channels, class_ids } => {
+            IncomingProxyContract::default().migrate(deps.storage, deps.api, origin, channels, class_ids)
         }
     }
 }

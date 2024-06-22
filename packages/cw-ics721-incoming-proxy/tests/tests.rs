@@ -19,6 +19,7 @@ pub const CHANNEL_1: &str = "channel_1";
 pub struct MockInstantiateMsg {
     origin: Option<String>,
     channels: Option<Vec<String>>,
+    class_ids: Option<Vec<String>>,
 }
 
 #[ics721_incoming_proxy_execute]
@@ -35,6 +36,7 @@ pub enum MockMigrateMsg {
     WithUpdate {
         ics721: Option<String>,
         channels: Option<Vec<String>>,
+        class_ids: Option<Vec<String>>,
     },
 }
 
@@ -72,6 +74,7 @@ pub mod entry {
             deps.api,
             msg.origin,
             msg.channels,
+            msg.class_ids,
         )?;
         Ok(Response::default())
     }
@@ -110,12 +113,13 @@ pub mod entry {
 
     pub fn migrate(deps: DepsMut, _env: Env, msg: MockMigrateMsg) -> StdResult<Response> {
         match msg {
-            MockMigrateMsg::WithUpdate { ics721, channels } => {
+            MockMigrateMsg::WithUpdate { ics721, channels, class_ids } => {
                 IncomingProxyContract::default().initialize(
                     deps.storage,
                     deps.api,
                     ics721,
                     channels,
+                    class_ids,
                 )?;
                 Ok(Response::default())
             }
@@ -140,7 +144,7 @@ pub struct Ics721IncomingProxyMultiTest {
 }
 
 impl Ics721IncomingProxyMultiTest {
-    pub fn new(origin: String, channels: Option<Vec<String>>) -> Self {
+    pub fn new(origin: String, channels: Option<Vec<String>>, class_ids: Option<Vec<String>>) -> Self {
         let sender = Addr::unchecked(SENDER_ADDR);
         let other = Addr::unchecked(OTHER_ADDR);
         let mut app = App::new(|router, _, storage| {
@@ -161,6 +165,7 @@ impl Ics721IncomingProxyMultiTest {
                 &MockInstantiateMsg {
                     channels: channels.clone(),
                     origin: Some(origin.clone()),
+                    class_ids: class_ids.clone(),
                 },
                 &[],
                 "contract",
@@ -232,20 +237,41 @@ impl Ics721IncomingProxyMultiTest {
 
 #[test]
 fn test_instantiate() {
-    // no channels defined
+    // no channels defined and no class_id defined
     {
-        let test = Ics721IncomingProxyMultiTest::new(ORIGIN_ADDR.to_string(), None);
+        let test = Ics721IncomingProxyMultiTest::new(ORIGIN_ADDR.to_string(), None, None);
         let origin = test.query_origin().unwrap();
         assert_eq!(origin, Addr::unchecked(ORIGIN_ADDR));
     }
 
-    // channels defined
+    // channels defined and no class_id defined
     {
         let channels = vec!["channel-0".to_string(), "channel-1".to_string()];
         let test =
-            Ics721IncomingProxyMultiTest::new(ORIGIN_ADDR.to_string(), Some(channels.clone()));
+            Ics721IncomingProxyMultiTest::new(ORIGIN_ADDR.to_string(), Some(channels.clone()), None);
         let channels = test.query_channels().unwrap();
         assert_eq!(channels, channels);
+    }
+    
+    // channels defined and class_id defined
+    {
+        let channels = vec!["channel-0".to_string(), "channel-1".to_string()];
+        let class_ids = vec!["class-0".to_string(), "class-1".to_string()];
+        let test = Ics721IncomingProxyMultiTest::new(
+            ORIGIN_ADDR.to_string(),
+            Some(channels.clone()),
+            Some(class_ids.clone()),
+        );
+        let channels = test.query_channels().unwrap();
+        assert_eq!(channels, channels);
+    }
+    
+    // channel not defined and class_id defined
+    {
+        let class_ids = vec!["class-0".to_string(), "class-1".to_string()];
+        let test = Ics721IncomingProxyMultiTest::new(ORIGIN_ADDR.to_string(), None, Some(class_ids.clone()));
+        let origin = test.query_origin().unwrap();
+        assert_eq!(origin, Addr::unchecked(ORIGIN_ADDR));
     }
 }
 
@@ -277,9 +303,9 @@ fn test_ics721_receive_packet() {
         token_uris: None,
     };
 
-    // test unauthorized
+    // test unauthorized channel
     {
-        let mut test = Ics721IncomingProxyMultiTest::new(ORIGIN_ADDR.to_string(), None);
+        let mut test = Ics721IncomingProxyMultiTest::new(ORIGIN_ADDR.to_string(), None, None);
         let error: MockContractError = test
             .execute_ics721_receive_packet(
                 Addr::unchecked(SENDER_ADDR),
@@ -316,12 +342,58 @@ fn test_ics721_receive_packet() {
             ))
         );
     }
+    
+    // test unauthorized origin
+    {
+        let mut test = Ics721IncomingProxyMultiTest::new(ORIGIN_ADDR.to_string(), None, None);
+        let error: MockContractError = test
+            .execute_ics721_receive_packet(
+                Addr::unchecked(OTHER_ADDR),
+                packet.clone(),
+                data.clone(),
+                &[],
+            )
+            .unwrap_err()
+            .downcast()
+            .unwrap();
 
+        assert_eq!(
+            error,
+            MockContractError::IncomingProxyError(IncomingProxyError::UnauthorizedOrigin(
+                OTHER_ADDR.to_string()
+            ))
+        );
+    }
+    
+    // test unauthorized class_id
+    {
+        let source_channels = vec!["channel-1".to_string()];
+        let class_ids = vec!["class-0".to_string(), "class-1".to_string()];
+        let mut test = Ics721IncomingProxyMultiTest::new(ORIGIN_ADDR.to_string(), Some(source_channels), Some(class_ids));
+        let error: MockContractError = test
+            .execute_ics721_receive_packet(
+                Addr::unchecked(ORIGIN_ADDR),
+                packet.clone(),
+                data.clone(),
+                &[],
+            )
+            .unwrap_err()
+            .downcast()
+            .unwrap();
+
+        assert_eq!(
+            error,
+            MockContractError::IncomingProxyError(IncomingProxyError::UnauthorizedClassId(
+                "some/class/id".to_string()
+            ))
+        );
+    }
+    
     // test authorized
     {
         let source_channels = vec!["channel-1".to_string()];
         let mut test =
-            Ics721IncomingProxyMultiTest::new(ORIGIN_ADDR.to_string(), Some(source_channels));
+            Ics721IncomingProxyMultiTest::new(ORIGIN_ADDR.to_string(), Some(source_channels), None);
         test.execute_ics721_receive_packet(
             Addr::unchecked(ORIGIN_ADDR),
             packet.clone(),
